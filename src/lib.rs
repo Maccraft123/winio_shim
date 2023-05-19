@@ -2,8 +2,9 @@ use windows::core::PWSTR;
 use std::ptr;
 use std::io::Write;
 use std::net::TcpStream;
-use once_cell::sync::OnceCell;
+use once_cell::sync::Lazy;
 use std::sync::Mutex;
+use std::cell::Cell;
 
 #[derive(Debug, Copy, Clone)]
 #[repr(C, packed)]
@@ -15,14 +16,23 @@ pub struct tag_phys_struct {
     phys_section: u64,
 }
 
-static OUT_TCP: OnceCell<Mutex<TcpStream>> = OnceCell::new();
+static OUT_TCP: Lazy<Mutex<Cell<TcpStream>>> = Lazy::new(|| {
+    Mutex::new(Cell::new(TcpStream::connect("192.168.1.101:2137").unwrap()))
+});
 
 #[allow(unused_must_use)]
 fn log(what: String) {
-    let mut stream = OUT_TCP.get_or_init(|| Mutex::new(TcpStream::connect("192.168.1.101:2137").unwrap()))
-        .lock()
-        .unwrap();
-    stream.write_all(what.as_str().as_bytes());
+    let mut cell = OUT_TCP.lock().unwrap();
+    let mut stream = cell.get_mut();
+
+    if stream.write_all(what.as_str().as_bytes()).is_err() {
+        drop(stream);
+        let Ok(tmp) = TcpStream::connect("192.168.1.101:2137") else {return};
+        cell.set(tmp);
+        stream = cell.get_mut();
+        stream.write_all(what.as_str().as_bytes());
+    }
+
     stream.write_all(b"\n\0");
 }
 
